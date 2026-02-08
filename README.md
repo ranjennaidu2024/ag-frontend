@@ -29,6 +29,15 @@ npm run build
 npm start
 ```
 
+### Cloud Build Configuration File
+
+This project includes a `cloudbuild.yaml` file that can be used for Cloud Build deployments. The file is configured to:
+- Build the Docker image using the project ID and commit SHA as tags
+- Push the image to Google Container Registry (GCR)
+- Use Cloud Logging only (no custom logs bucket required)
+
+You can use this file directly in Cloud Build triggers, or use the inline YAML configuration as described in the deployment steps below.
+
 ## Deploying to Google Cloud Platform (GCP)
 
 This guide will walk you through deploying the frontend application to Google Cloud Platform using **Cloud Run** via the GCP Console UI only (no CLI required).
@@ -78,6 +87,8 @@ You have two options:
 
 #### Step 4: Create a Cloud Build Trigger
 
+**Important:** This step uses an **Inline YAML configuration** instead of the "Dockerfile" option to avoid UI bugs and properly handle logging requirements, especially when using custom service accounts.
+
 1. In GCP Console, click **☰** menu > **"Cloud Build"** > **"Triggers"**
 2. Click **"CREATE TRIGGER"**
 3. Configure the trigger:
@@ -85,13 +96,53 @@ You have two options:
    - **Event**: Select **"Push to a branch"**
    - **Source**: 
      - If using Source Repositories: Select your repository
-     - If uploading manually: Select **"Cloud Source Repositories"** and create a new repo
-   - **Branch**: `^main$` (or your main branch name)
-   - **Configuration**: Select **"Dockerfile"**
-   - **Location**: Select **"Cloud Source Repositories"** or **"Cloud Storage"** if uploading zip
-   - **Dockerfile location**: `Dockerfile`
-   - **Dockerfile directory**: `/` (root of your project)
-4. Click **"CREATE"**
+     - If using GitHub: Connect your GitHub account and select the repository
+   - **Branch**: `^main$` (or your main branch name, e.g., `^master$`)
+   
+4. **Configuration Settings (Critical):**
+   - **Configuration**: Select **"Cloud Build configuration file (yaml or json)"** (NOT "Dockerfile")
+   - **Location**: Select **"Inline"** (this allows you to paste the YAML directly)
+   - **Cloud Build configuration file contents**: Paste the following YAML:
+   
+   ```yaml
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - '-t'
+      - gcr.io/$PROJECT_ID/frontend:latest
+      - '-t'
+      - gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/frontend
+options:
+  logging: CLOUD_LOGGING_ONLY
+   ```
+
+5. **Service Account Configuration (if using custom service account):**
+   - Scroll down to **"Advanced"** section
+   - If you're using a custom service account, you'll need to grant it proper permissions (see Step 4a below)
+   - If using default service account, you can skip to Step 6
+
+6. Click **"CREATE"**
+
+#### Step 4a: Configure Service Account Permissions (Required if using custom service account)
+
+If you're using a custom service account for Cloud Build, you need to grant it the following IAM roles to avoid "Denied" or "Repo Not Found" errors:
+
+1. Go to **"IAM & Admin"** > **"IAM"** in GCP Console
+2. Find your service account (or the Cloud Build service account)
+3. Click the **✏️ (edit/pencil icon)** next to the service account
+4. Click **"ADD ANOTHER ROLE"** and add these three roles:
+   - **Logs Writer** (`roles/logging.logWriter`) - To send logs to Cloud Logging
+   - **Artifact Registry Writer** (`roles/artifactregistry.writer`) - To upload the image
+   - **Artifact Registry Create-on-push Writer** (`roles/artifactregistry.createOnPushWriter`) - To allow automatic creation of the "frontend" repository during first push
+5. Click **"SAVE"**
+
+**Note:** If you're using the default compute service account, these permissions are usually already configured. The custom service account approach gives you more control but requires manual permission setup.
 
 #### Step 5: Build Your Container Image
 
@@ -118,7 +169,9 @@ You have two options:
    - **Service name**: `antigravity-frontend`
    - **Region**: Choose a region close to your users (e.g., `us-central1`, `us-east1`, `europe-west1`)
    - **Deploy one revision from an existing container image**: Click **"SELECT"**
-   - **Container image URL**: Click **"SELECT"** and choose the image you just built (it should be named something like `gcr.io/YOUR-PROJECT-ID/antigravity-frontend`)
+   - **Container image URL**: Click **"SELECT"** and choose the image you just built (it should be named something like `gcr.io/YOUR-PROJECT-ID/frontend:COMMIT_SHA` or you can select the latest tag)
+     - **Note:** The image name format is `gcr.io/YOUR-PROJECT-ID/frontend:COMMIT_SHA` based on the Cloud Build configuration
+     - You can select any commit SHA tag, or use the latest build
    - **Container port**: `3000`
    - **CPU allocation**: Select **"CPU is only allocated during request processing"** (to save costs)
    - **Memory**: `512 MiB` (minimum, increase if needed)
@@ -224,6 +277,40 @@ If you prefer to upload files directly without using git:
 - Ensure Cloud Build completed successfully
 - Check **"Container Registry"** > **"Images"** to verify image exists
 - Verify you're selecting the correct image in Cloud Run deployment
+
+#### Cloud Build Trigger Error: "Failed to trigger build: if 'build.service_account' is specified..."
+
+This error occurs when a service account is specified but logging configuration is missing. The recommended solution is to use the **Inline YAML configuration** approach described in Step 4.
+
+**Solution 1: Use Inline YAML Configuration (Recommended - Works Every Time)**
+1. Go to **"Cloud Build"** > **"Triggers"**
+2. Click on your trigger name (`antigravity-frontend-build`)
+3. Click **"EDIT"** button
+4. Change **"Configuration"** from **"Dockerfile"** to **"Cloud Build configuration file (yaml or json)"**
+5. Set **"Location"** to **"Inline"**
+6. Paste the YAML configuration from Step 4 (with `logging: CLOUD_LOGGING_ONLY` in options)
+7. Click **"SAVE"**
+
+**Solution 2: Fix Service Account Permissions**
+If you're still getting "Denied" or "Repo Not Found" errors:
+1. Follow **Step 4a** above to grant proper IAM roles to your service account
+2. Ensure these roles are added:
+   - `roles/logging.logWriter`
+   - `roles/artifactregistry.writer`
+   - `roles/artifactregistry.createOnPushWriter`
+
+**Solution 3: Use Default Service Account**
+1. Go to **"Cloud Build"** > **"Triggers"**
+2. Click on your trigger name
+3. Click **"EDIT"**
+4. In **"Advanced"** section, find **"Service account"**
+5. Change it to **"Default compute service account"** (or leave it empty)
+6. Click **"SAVE"**
+
+**Why Inline YAML Works Better:**
+- The "Dockerfile" configuration option sometimes hides logging settings in the UI
+- Inline YAML gives you full control over all build options
+- The `logging: CLOUD_LOGGING_ONLY` option in YAML explicitly satisfies the logging requirement
 
 ### Additional Resources
 
