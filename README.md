@@ -551,3 +551,7 @@ If you're still getting "Denied" or "Repo Not Found" errors:
 ## Development Notes
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+---
+
+IMPORTANT NOTE: ALWAYS MAKE SURE LATEST CONTAINER IMAGE IS SELECTED WHEN DEPLOY VIA CLOUD RUN
