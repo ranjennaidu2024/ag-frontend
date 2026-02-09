@@ -33,27 +33,30 @@ npm start
 
 The frontend uses environment variables to configure the backend API URL. This allows different URLs for local development and production.
 
+**Important:** `NEXT_PUBLIC_*` environment variables are embedded into the Next.js build at **build time**, not runtime. This means:
+- For **local development**: Set in `.env.local` file (or use default `localhost:8080`)
+- For **production (GCP)**: Must be set during Docker build via Cloud Build substitution variables
+
 **Local Development:**
 - By default, the frontend connects to `http://localhost:8080/api` (your local backend)
 - No configuration needed if running backend locally on port 8080
+- To override, create `.env.local`:
+  ```bash
+  # .env.local
+  NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
+  ```
 
 **Production (GCP):**
-- Set `NEXT_PUBLIC_API_BASE_URL` environment variable to your deployed backend URL
-- Example: `NEXT_PUBLIC_API_BASE_URL=https://antigravity-backend-xxxxx-uc.a.run.app/api`
+- The backend URL is set during the Docker build process
+- Configure it in Cloud Build trigger's substitution variables (see Step 4)
+- Example: `_API_BASE_URL: 'https://antigravity-backend-xxxxx-uc.a.run.app/api'`
+- **Cannot be changed at runtime** - must rebuild the Docker image
 
-**Creating `.env.local` for Local Development (Optional):**
-
-If you want to override the default localhost URL, create a `.env.local` file in the frontend root:
-
-```bash
-# .env.local
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
-```
-
-**Note:** 
-- Environment variables prefixed with `NEXT_PUBLIC_` are exposed to the browser
-- Never commit `.env.local` to version control (it's already in `.gitignore`)
-- For production, set environment variables in Cloud Run (see deployment steps below)
+**About `.env.example`:**
+- `.env.example` is a template file that should be committed to version control
+- It shows what environment variables are needed
+- Users copy it to `.env.local` for local development
+- It's safe to commit because it doesn't contain actual secrets/URLs
 
 ### Cloud Build Configuration File
 
@@ -137,21 +140,32 @@ You have two options:
    
    ```yaml
 steps:
-  - name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - '-t'
-      - gcr.io/$PROJECT_ID/frontend:latest
-      - '-t'
-      - gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA
-      - .
-  - name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - gcr.io/$PROJECT_ID/frontend
+  # Build the image using the project ID variable
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', 
+      '--build-arg', 'NEXT_PUBLIC_API_BASE_URL=${_API_BASE_URL}',
+      '-t', 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA', 
+      '.'
+    ]
+
+  # Push the image to the registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA']
+
 options:
+  # This line solved the "Failed to trigger build" error
   logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _API_BASE_URL: 'https://your-backend-service-url/api'  # Replace with your actual backend URL
    ```
+   
+   **IMPORTANT:** Replace `https://your-backend-service-url/api` with your actual backend Cloud Run URL.
+   - Example: If your backend URL is `https://antigravity-backend-xxxxx-uc.a.run.app`, then use:
+     - `_API_BASE_URL: 'https://antigravity-backend-xxxxx-uc.a.run.app/api'`
+   - **Note:** Make sure to include `/api` at the end of the URL
+   - **If you don't know your backend URL yet:** You can set a placeholder and update it later (see Step 7)
 
 5. **Service Account Configuration (if using custom service account):**
    - Scroll down to **"Advanced"** section
@@ -213,15 +227,8 @@ If you're using a custom service account for Cloud Build, you need to grant it t
 
    **Container Settings:**
    - Click **"Container"** tab
-   - **Environment variables**: Add the following environment variables:
-     - `NODE_ENV` = `production`
-     - `NEXT_PUBLIC_API_BASE_URL` = `https://your-backend-service-url/api`
-       - **Important:** Replace `your-backend-service-url` with your actual backend Cloud Run service URL
-       - Example: If your backend URL is `https://antigravity-backend-xxxxx-uc.a.run.app`, then set:
-         - `NEXT_PUBLIC_API_BASE_URL` = `https://antigravity-backend-xxxxx-uc.a.run.app/api`
-       - **How to find your backend URL:** Go to **"Cloud Run"** > Select your backend service > Copy the URL from the top of the page
-       - **Note:** Make sure to include `/api` at the end of the URL (the frontend appends endpoint paths like `/projects` to this base URL)
    - **Port**: `3000`
+   - **Note:** The backend API URL is configured during the build process (see Step 4), not here. Environment variables set here won't work for `NEXT_PUBLIC_*` variables as they're embedded at build time.
 
    **Security:**
    - **Authentication**: Select **"Allow unauthenticated invocations"** (to make it publicly accessible)
@@ -229,33 +236,47 @@ If you're using a custom service account for Cloud Build, you need to grant it t
 4. Click **"CREATE"** or **"DEPLOY"**
 5. Wait for the deployment to complete (this may take a few minutes)
 
-#### Step 7: Configure Backend API URL
+#### Step 7: Configure Backend API URL in Build
 
-**Important:** Before accessing your application, you need to configure the backend API URL so the frontend can communicate with your deployed backend service.
+**CRITICAL:** The backend API URL must be set **during the build process**, not at runtime. This is because `NEXT_PUBLIC_*` environment variables are embedded into the Next.js build at build time.
 
-**If you haven't set the environment variable during deployment (Step 6), you can add it now:**
+**If you didn't set the backend URL in Step 4 (or need to update it):**
 
-1. Go to **"Cloud Run"** > Select your frontend service (`antigravity-frontend`)
-2. Click **"EDIT & DEPLOY NEW REVISION"**
-3. Scroll down to **"Container"** section
-4. Under **"Environment variables"**, click **"ADD VARIABLE"**
-5. Add:
-   - **Name**: `NEXT_PUBLIC_API_BASE_URL`
-   - **Value**: `https://your-backend-service-url/api`
-     - Replace `your-backend-service-url` with your backend Cloud Run URL
-     - Example: `https://antigravity-backend-xxxxx-uc.a.run.app/api`
-6. Click **"DEPLOY"** to apply the changes
+1. Go to **"Cloud Build"** > **"Triggers"** in GCP Console
+2. Click on your trigger (`antigravity-frontend-build`)
+3. Click **"EDIT"**
+4. Scroll down to find the YAML configuration
+5. In the `substitutions` section, update `_API_BASE_URL`:
+   ```yaml
+   substitutions:
+     _API_BASE_URL: 'https://your-actual-backend-url/api'
+   ```
+6. **How to find your backend URL:**
+   - Go to **"Cloud Run"** > Select your backend service (e.g., `antigravity-backend`)
+   - Copy the URL shown at the top (e.g., `https://antigravity-backend-xxxxx-uc.a.run.app`)
+   - Append `/api` to this URL
+   - Example: `https://antigravity-backend-xxxxx-uc.a.run.app/api`
+7. Click **"SAVE"**
+8. **Rebuild the image:**
+   - Go to **"Cloud Build"** > **"History"**
+   - Click **"RUN TRIGGER"** or push a new commit to trigger the build
+   - Wait for the build to complete
+9. **Redeploy to Cloud Run:**
+   - Go to **"Cloud Run"** > Your frontend service > **"EDIT & DEPLOY NEW REVISION"**
+   - Select the newly built image (with the latest commit SHA)
+   - Click **"DEPLOY"**
 
-**How to find your backend URL:**
-1. Go to **"Cloud Run"** in GCP Console
-2. Find and click on your backend service (e.g., `antigravity-backend`)
-3. Copy the URL shown at the top (e.g., `https://antigravity-backend-xxxxx-uc.a.run.app`)
-4. Append `/api` to this URL for the environment variable value
+**Why this is necessary:**
+- Next.js embeds `NEXT_PUBLIC_*` variables into the JavaScript bundle at build time
+- Setting environment variables in Cloud Run won't work because the code is already built
+- You must rebuild the Docker image with the correct backend URL
 
 **Verifying the Configuration:**
-- After deployment, check the Cloud Run logs to ensure the environment variable is set
-- Test the frontend application - it should now be able to fetch data from the backend
-- Open browser developer tools (F12) → Network tab → Check API calls are going to the correct backend URL
+- After redeployment, open your frontend URL in a browser
+- Open browser developer tools (F12) → **Console** tab
+- Check for any API errors
+- Go to **Network** tab → Look for requests to `/api/projects` - they should be going to your backend URL (not localhost)
+- If you still see `localhost:8080`, the build didn't include the environment variable - rebuild with the correct substitution variable
 
 #### Step 8: Access Your Deployed Application
 
@@ -316,12 +337,19 @@ If you prefer to upload files directly without using git:
 #### Updating Backend API URL
 If your backend URL changes or you need to point to a different backend:
 
-1. Go to **"Cloud Run"** > Select your frontend service
-2. Click **"EDIT & DEPLOY NEW REVISION"**
-3. Scroll to **"Container"** section → **"Environment variables"**
-4. Find `NEXT_PUBLIC_API_BASE_URL` and update its value
-5. Click **"DEPLOY"** to apply changes
-6. The new backend URL will be used immediately after deployment
+**Important:** You must rebuild the Docker image with the new URL, not just update environment variables in Cloud Run.
+
+1. Go to **"Cloud Build"** > **"Triggers"** > Select your trigger
+2. Click **"EDIT"**
+3. Update the `_API_BASE_URL` substitution variable in the YAML:
+   ```yaml
+   substitutions:
+     _API_BASE_URL: 'https://new-backend-url/api'
+   ```
+4. Click **"SAVE"**
+5. Trigger a new build (push a commit or click **"RUN TRIGGER"**)
+6. Once build completes, redeploy to Cloud Run with the new image
+7. The new backend URL will be embedded in the rebuilt application
 
 #### Setting Custom Domain (Optional)
 1. Go to **"Cloud Run"** > Your service > **"MANAGE CUSTOM DOMAINS"**
@@ -357,12 +385,33 @@ If your backend URL changes or you need to point to a different backend:
 - Ensure port 3000 is exposed in Dockerfile
 - Check memory allocation (increase if needed)
 
-#### Frontend Cannot Connect to Backend API
-- **Verify environment variable is set:**
-  1. Go to **"Cloud Run"** > Your frontend service > **"EDIT & DEPLOY NEW REVISION"**
-  2. Check **"Environment variables"** section
-  3. Ensure `NEXT_PUBLIC_API_BASE_URL` is set and points to your backend URL (with `/api` suffix)
-  4. Example: `https://antigravity-backend-xxxxx-uc.a.run.app/api`
+#### Frontend Cannot Connect to Backend API / Still Using localhost
+
+**The most common issue:** The backend URL wasn't set during the build, so it's still using the default `localhost:8080`.
+
+**Solution: Rebuild with the correct backend URL**
+
+1. **Check your Cloud Build trigger configuration:**
+   - Go to **"Cloud Build"** > **"Triggers"** > Select your trigger
+   - Click **"EDIT"** and check the `substitutions` section
+   - Ensure `_API_BASE_URL` is set to your backend URL + `/api`
+   - Example: `_API_BASE_URL: 'https://antigravity-backend-xxxxx-uc.a.run.app/api'`
+
+2. **Rebuild the image:**
+   - Go to **"Cloud Build"** > **"History"**
+   - Click **"RUN TRIGGER"** (or push a new commit)
+   - Wait for build to complete
+
+3. **Redeploy with the new image:**
+   - Go to **"Cloud Run"** > Your frontend service > **"EDIT & DEPLOY NEW REVISION"**
+   - Select the newly built image
+   - Click **"DEPLOY"**
+
+4. **Verify it's working:**
+   - Open your frontend URL in browser
+   - Open developer tools (F12) → **Network** tab
+   - Look for API requests - they should go to your backend URL, NOT localhost
+   - If still seeing localhost, the build didn't include the variable - check Step 1 again
 
 - **Check backend URL is correct:**
   - Go to **"Cloud Run"** > Your backend service

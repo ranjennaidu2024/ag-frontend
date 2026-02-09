@@ -1,15 +1,28 @@
 steps:
-  - name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - '-t'
-      - gcr.io/$PROJECT_ID/frontend:latest
-      - '-t'
-      - gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA
-      - .
-  - name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - gcr.io/$PROJECT_ID/frontend
+  # Build the image using the project ID variable
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', 
+      '--build-arg', 'NEXT_PUBLIC_API_BASE_URL=${_API_BASE_URL}',
+      '-t', 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA', 
+      '.'
+    ]
+
+  # Push the image to the registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/frontend:$COMMIT_SHA']
+
 options:
+  # This line solved the "Failed to trigger build" error
   logging: CLOUD_LOGGING_ONLY
+
+# Substitution variables - IMPORTANT: Set this when creating/editing the Cloud Build trigger
+# _API_BASE_URL should be set to your backend Cloud Run URL + /api
+# Example: https://antigravity-backend-xxxxx-uc.a.run.app/api
+# 
+# To set this in Cloud Build trigger:
+# 1. Edit your trigger in GCP Console
+# 2. Find the "Substitution variables" section
+# 3. Add: _API_BASE_URL = https://your-backend-url/api
+substitutions:
+  _API_BASE_URL: 'https://your-backend-service-url/api'  # REPLACE THIS with your actual backend URL
