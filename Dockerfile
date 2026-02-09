@@ -19,7 +19,10 @@ COPY . .
 # Build Next.js application
 # ARG allows passing build-time variables
 ARG NEXT_PUBLIC_API_BASE_URL
+# Set the environment variable for the build
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+# Debug: Print the value to verify it's set (will show in build logs)
+RUN echo "Building with NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}"
 RUN npm run build
 
 # Production image, copy all the files and run next

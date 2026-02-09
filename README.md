@@ -389,29 +389,90 @@ If your backend URL changes or you need to point to a different backend:
 
 **The most common issue:** The backend URL wasn't set during the build, so it's still using the default `localhost:8080`.
 
-**Solution: Rebuild with the correct backend URL**
+**QUICK FIX - Step by Step:**
 
-1. **Check your Cloud Build trigger configuration:**
-   - Go to **"Cloud Build"** > **"Triggers"** > Select your trigger
-   - Click **"EDIT"** and check the `substitutions` section
-   - Ensure `_API_BASE_URL` is set to your backend URL + `/api`
-   - Example: `_API_BASE_URL: 'https://antigravity-backend-xxxxx-uc.a.run.app/api'`
+1. **Find your backend Cloud Run URL:**
+   - Go to GCP Console → **"Cloud Run"**
+   - Find your backend service (e.g., `antigravity-backend`)
+   - Copy the URL shown at the top (e.g., `https://antigravity-backend-xxxxx-uc.a.run.app`)
+   - **Note:** You need the backend URL, not the frontend URL
 
-2. **Rebuild the image:**
+2. **Update Cloud Build Trigger:**
+   - Go to **"Cloud Build"** > **"Triggers"**
+   - Click on your frontend trigger (e.g., `antigravity-frontend-build`)
+   - Click **"EDIT"**
+   - Scroll down to the YAML configuration
+   - Find the `substitutions` section (at the bottom of the YAML)
+   - Update `_API_BASE_URL` with your backend URL + `/api`:
+     ```yaml
+     substitutions:
+       _API_BASE_URL: 'https://YOUR-BACKEND-URL/api'
+     ```
+   - **Example:** If your backend URL is `https://antigravity-backend-xxxxx-uc.a.run.app`, then:
+     ```yaml
+     substitutions:
+       _API_BASE_URL: 'https://antigravity-backend-xxxxx-uc.a.run.app/api'
+     ```
+   - **Important:** Make sure to include `/api` at the end
+   - **Alternative:** If you don't see `substitutions` in the YAML, you can also set it when running the trigger:
+     - When clicking **"RUN TRIGGER"**, look for **"Substitution variables"** section
+     - Add: `_API_BASE_URL` = `https://your-backend-url/api`
+   - Click **"SAVE"**
+
+3. **Rebuild the Docker image:**
    - Go to **"Cloud Build"** > **"History"**
-   - Click **"RUN TRIGGER"** (or push a new commit)
-   - Wait for build to complete
+   - Click **"RUN TRIGGER"** button
+   - Select your trigger from the dropdown
+   - **IMPORTANT:** Before clicking "RUN", check if there's a **"Substitution variables"** section
+   - If you see it, verify `_API_BASE_URL` is set to your backend URL + `/api`
+   - Click **"RUN"**
+   - Wait for the build to complete (watch for green checkmark)
+   - **VERIFY IN BUILD LOGS:**
+     - Click on the build to view details
+     - Look for the log line: `Building with NEXT_PUBLIC_API_BASE_URL=...`
+     - It should show your backend URL, NOT be empty or show localhost
+     - If it's empty or wrong, the substitution variable wasn't set correctly - go back to Step 2
+   - **Note the commit SHA** or image tag of the new build
 
-3. **Redeploy with the new image:**
-   - Go to **"Cloud Run"** > Your frontend service > **"EDIT & DEPLOY NEW REVISION"**
-   - Select the newly built image
-   - Click **"DEPLOY"**
+4. **Redeploy to Cloud Run:**
+   - Go to **"Cloud Run"** > Select your frontend service
+   - Click **"EDIT & DEPLOY NEW REVISION"**
+   - Under **"Container image URL"**, click **"SELECT"**
+   - Choose the **newly built image** (the one you just created)
+   - Click **"SELECT"**
+   - Click **"DEPLOY"** at the bottom
+   - Wait for deployment to complete
 
-4. **Verify it's working:**
-   - Open your frontend URL in browser
-   - Open developer tools (F12) → **Network** tab
-   - Look for API requests - they should go to your backend URL, NOT localhost
-   - If still seeing localhost, the build didn't include the variable - check Step 1 again
+5. **Verify it's fixed:**
+   - Open your frontend URL: `https://frontend-1033339459358.asia-southeast1.run.app/api-test`
+   - Open browser developer tools (Press **F12**)
+   - Go to **"Console"** tab first - you should see debug logs showing:
+     - `API Test Page - API Base URL: https://your-backend-url/api`
+     - If it still shows `http://localhost:8080/api`, the build didn't include the variable
+   - Go to **"Network"** tab
+   - Click **"Execute"** on any API endpoint in the API Tester
+   - Look at the network request URL - it should show your backend URL, NOT `localhost:8080`
+   - If you still see `localhost:8080`:
+     - Check the Console logs - what does it say for `API Base URL`?
+     - Go back to Step 2 and double-check the substitution variable is set correctly
+     - Make sure you rebuilt AND redeployed with the new image
+     - Check the Cloud Build logs to verify the variable was passed during build
+
+**Common Mistakes:**
+- ❌ Setting the frontend URL instead of backend URL
+- ❌ Forgetting to add `/api` at the end
+- ❌ Not rebuilding after updating the trigger
+- ❌ Deploying the old image instead of the newly built one
+- ❌ Setting environment variable in Cloud Run (won't work - must be in build)
+- ❌ Substitution variable `_API_BASE_URL` is empty or not set in the trigger
+- ❌ Not checking build logs to verify the variable was passed
+
+**How to Check if Variable is Set in Build:**
+1. Go to **"Cloud Build"** > **"History"** > Click on your latest build
+2. Look for this line in the logs: `Building with NEXT_PUBLIC_API_BASE_URL=...`
+3. If it shows your backend URL → Good! The build has it
+4. If it's empty or shows nothing → The substitution variable wasn't set, go back to Step 2
+5. If you don't see this line → The Dockerfile wasn't updated, make sure you pushed the latest code
 
 - **Check backend URL is correct:**
   - Go to **"Cloud Run"** > Your backend service
