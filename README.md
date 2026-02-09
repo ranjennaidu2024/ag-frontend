@@ -29,6 +29,32 @@ npm run build
 npm start
 ```
 
+### Environment Variables
+
+The frontend uses environment variables to configure the backend API URL. This allows different URLs for local development and production.
+
+**Local Development:**
+- By default, the frontend connects to `http://localhost:8080/api` (your local backend)
+- No configuration needed if running backend locally on port 8080
+
+**Production (GCP):**
+- Set `NEXT_PUBLIC_API_BASE_URL` environment variable to your deployed backend URL
+- Example: `NEXT_PUBLIC_API_BASE_URL=https://antigravity-backend-xxxxx-uc.a.run.app/api`
+
+**Creating `.env.local` for Local Development (Optional):**
+
+If you want to override the default localhost URL, create a `.env.local` file in the frontend root:
+
+```bash
+# .env.local
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
+```
+
+**Note:** 
+- Environment variables prefixed with `NEXT_PUBLIC_` are exposed to the browser
+- Never commit `.env.local` to version control (it's already in `.gitignore`)
+- For production, set environment variables in Cloud Run (see deployment steps below)
+
 ### Cloud Build Configuration File
 
 This project includes a `cloudbuild.yaml` file that can be used for Cloud Build deployments. The file is configured to:
@@ -41,6 +67,11 @@ You can use this file directly in Cloud Build triggers, or use the inline YAML c
 ## Deploying to Google Cloud Platform (GCP)
 
 This guide will walk you through deploying the frontend application to Google Cloud Platform using **Cloud Run** via the GCP Console UI only (no CLI required).
+
+**Quick Reference - Backend API Configuration:**
+- After deploying both frontend and backend, you need to configure the backend URL
+- Set environment variable `NEXT_PUBLIC_API_BASE_URL` in Cloud Run to: `https://your-backend-url/api`
+- See **Step 6** (during deployment) or **Step 7** (after deployment) for detailed instructions
 
 ### Prerequisites
 
@@ -182,7 +213,14 @@ If you're using a custom service account for Cloud Build, you need to grant it t
 
    **Container Settings:**
    - Click **"Container"** tab
-   - **Environment variables**: Add any required environment variables here (e.g., `NODE_ENV=production`)
+   - **Environment variables**: Add the following environment variables:
+     - `NODE_ENV` = `production`
+     - `NEXT_PUBLIC_API_BASE_URL` = `https://your-backend-service-url/api`
+       - **Important:** Replace `your-backend-service-url` with your actual backend Cloud Run service URL
+       - Example: If your backend URL is `https://antigravity-backend-xxxxx-uc.a.run.app`, then set:
+         - `NEXT_PUBLIC_API_BASE_URL` = `https://antigravity-backend-xxxxx-uc.a.run.app/api`
+       - **How to find your backend URL:** Go to **"Cloud Run"** > Select your backend service > Copy the URL from the top of the page
+       - **Note:** Make sure to include `/api` at the end of the URL (the frontend appends endpoint paths like `/projects` to this base URL)
    - **Port**: `3000`
 
    **Security:**
@@ -191,13 +229,48 @@ If you're using a custom service account for Cloud Build, you need to grant it t
 4. Click **"CREATE"** or **"DEPLOY"**
 5. Wait for the deployment to complete (this may take a few minutes)
 
-#### Step 7: Access Your Deployed Application
+#### Step 7: Configure Backend API URL
+
+**Important:** Before accessing your application, you need to configure the backend API URL so the frontend can communicate with your deployed backend service.
+
+**If you haven't set the environment variable during deployment (Step 6), you can add it now:**
+
+1. Go to **"Cloud Run"** > Select your frontend service (`antigravity-frontend`)
+2. Click **"EDIT & DEPLOY NEW REVISION"**
+3. Scroll down to **"Container"** section
+4. Under **"Environment variables"**, click **"ADD VARIABLE"**
+5. Add:
+   - **Name**: `NEXT_PUBLIC_API_BASE_URL`
+   - **Value**: `https://your-backend-service-url/api`
+     - Replace `your-backend-service-url` with your backend Cloud Run URL
+     - Example: `https://antigravity-backend-xxxxx-uc.a.run.app/api`
+6. Click **"DEPLOY"** to apply the changes
+
+**How to find your backend URL:**
+1. Go to **"Cloud Run"** in GCP Console
+2. Find and click on your backend service (e.g., `antigravity-backend`)
+3. Copy the URL shown at the top (e.g., `https://antigravity-backend-xxxxx-uc.a.run.app`)
+4. Append `/api` to this URL for the environment variable value
+
+**Verifying the Configuration:**
+- After deployment, check the Cloud Run logs to ensure the environment variable is set
+- Test the frontend application - it should now be able to fetch data from the backend
+- Open browser developer tools (F12) → Network tab → Check API calls are going to the correct backend URL
+
+#### Step 8: Access Your Deployed Application
 
 1. Once deployment is complete, you'll see your service in the Cloud Run dashboard
 2. Click on your service name (`antigravity-frontend`)
 3. You'll see a **URL** at the top of the page (e.g., `https://antigravity-frontend-xxxxx-uc.a.run.app`)
 4. Click on this URL or copy it to access your deployed application
-5. Your application is now publicly accessible!
+5. Your application should now be able to communicate with your backend API!
+
+**Testing the Connection:**
+- Open your frontend URL in a browser
+- Open browser developer tools (F12) → **Console** tab
+- Check for any API errors
+- Go to **Network** tab → Look for requests to `/api/projects` - they should be going to your backend URL
+- If you see CORS errors, ensure your backend CORS configuration allows requests from your frontend domain
 
 ### Alternative: Deploy Using Cloud Build with Manual Upload
 
@@ -237,7 +310,18 @@ If you prefer to upload files directly without using git:
 3. Cloud Build will automatically trigger (if configured) or manually run the build
 4. Once the new image is built, go to **"Cloud Run"** > Your service > **"EDIT & DEPLOY NEW REVISION"**
 5. Select the new container image
-6. Click **"DEPLOY"**
+6. **Important:** Verify that `NEXT_PUBLIC_API_BASE_URL` environment variable is still set correctly
+7. Click **"DEPLOY"**
+
+#### Updating Backend API URL
+If your backend URL changes or you need to point to a different backend:
+
+1. Go to **"Cloud Run"** > Select your frontend service
+2. Click **"EDIT & DEPLOY NEW REVISION"**
+3. Scroll to **"Container"** section → **"Environment variables"**
+4. Find `NEXT_PUBLIC_API_BASE_URL` and update its value
+5. Click **"DEPLOY"** to apply changes
+6. The new backend URL will be used immediately after deployment
 
 #### Setting Custom Domain (Optional)
 1. Go to **"Cloud Run"** > Your service > **"MANAGE CUSTOM DOMAINS"**
@@ -272,6 +356,39 @@ If you prefer to upload files directly without using git:
 - Verify environment variables are set correctly
 - Ensure port 3000 is exposed in Dockerfile
 - Check memory allocation (increase if needed)
+
+#### Frontend Cannot Connect to Backend API
+- **Verify environment variable is set:**
+  1. Go to **"Cloud Run"** > Your frontend service > **"EDIT & DEPLOY NEW REVISION"**
+  2. Check **"Environment variables"** section
+  3. Ensure `NEXT_PUBLIC_API_BASE_URL` is set and points to your backend URL (with `/api` suffix)
+  4. Example: `https://antigravity-backend-xxxxx-uc.a.run.app/api`
+
+- **Check backend URL is correct:**
+  - Go to **"Cloud Run"** > Your backend service
+  - Copy the exact URL shown at the top
+  - Ensure the environment variable uses this URL + `/api`
+
+- **Test backend is accessible:**
+  - Open your backend URL in browser: `https://your-backend-url/actuator/health`
+  - Should return: `{"status":"UP"}`
+  - Test API endpoint: `https://your-backend-url/api/projects`
+  - Should return JSON data or an empty array
+
+- **Check CORS configuration:**
+  - If you see CORS errors in browser console, ensure backend allows requests from your frontend domain
+  - Backend should allow: `https://your-frontend-url` (without trailing slash)
+  - Check backend `WebConfig.java` CORS settings
+
+- **Check browser console:**
+  - Open browser developer tools (F12) → **Console** tab
+  - Look for API errors or CORS errors
+  - Go to **Network** tab → Check if API requests are being made and what the response is
+
+- **Verify both services are deployed:**
+  - Ensure backend service is running (green status in Cloud Run)
+  - Ensure frontend service is running (green status in Cloud Run)
+  - Both should be in the same GCP project (or backend should allow cross-project access)
 
 #### Container Image Not Found
 - Ensure Cloud Build completed successfully

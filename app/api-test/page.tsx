@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { Sidebar } from '@/components/Sidebar';
 
-const API_BASE = 'http://localhost:8080/api';
+// Use environment variable for API base URL, fallback to localhost for local development
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api';
 
 type Endpoint = 'projects' | 'rewards';
 

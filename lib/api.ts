@@ -1,4 +1,5 @@
-const API_BASE_URL = 'http://localhost:8080/api';
+// Use environment variable for API base URL, fallback to localhost for local development
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api';
 
 export async function fetchProjects() {
     const response = await fetch(`${API_BASE_URL}/projects`);
